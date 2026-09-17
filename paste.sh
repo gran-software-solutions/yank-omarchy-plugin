@@ -18,15 +18,27 @@
 
 set -u
 
-# The trailing x keeps the entry's own trailing newlines through $(...).
-text=$(cat; printf x)
-text=${text%x}
+copy_only=""
+if [ "${1:-}" = "--copy-only" ]; then
+  copy_only=1
+  shift
+fi
+
+if [ $# -gt 0 ]; then
+  # An overlay loaded before an update still passes the text as an argument,
+  # and has already copied it itself.
+  text="$1"
+else
+  # The trailing x keeps the entry's own trailing newlines through $(...).
+  text=$(cat; printf x)
+  text=${text%x}
+fi
 
 [ -n "$text" ] || exit 0
 
 printf '%s' "$text" | wl-copy >/dev/null 2>&1
 
-[ "${1:-}" = "--copy-only" ] && exit 0
+[ -n "$copy_only" ] && exit 0
 
 # Let the panel give the keyboard back before anything is delivered.
 sleep 0.18
