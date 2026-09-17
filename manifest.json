@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "de.gransoftware.yank",
+  "name": "Yank",
+  "version": "1.0.0",
+  "author": "Gran Software Solutions",
+  "license": "MIT",
+  "description": "Minimal clipboard manager: background text & image capture, search, preview",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Yank.qml"
+  }
+}
