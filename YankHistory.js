@@ -49,9 +49,10 @@ function parseHistory(raw) {
   }
 }
 
-// Enforce limits: maxEntries caps the count (oldest dropped first);
-// maxAgeDays drops entries older than that (0 disables the age limit).
-// Pinned entries are exempt from the age limit, not the count limit.
+// Pinned entries are never removed by anything but an explicit unpin: not by
+// the count cap, not by the age limit, not by Delete, not by clear. Every
+// function below that drops entries only ever drops unpinned ones.
+
 // Entries older than "days", ignoring pinned ones. Used both to prune and to
 // tell the settings screen how much a retention choice would remove.
 function entriesOlderThan(history, days) {
@@ -69,33 +70,43 @@ function entriesOlderThan(history, days) {
   return out
 }
 
+// Enforce limits on the unpinned entries: maxEntries caps how many are kept
+// (oldest dropped first); maxAgeDays drops those older than that (0 disables
+// the age limit). Pinned entries always survive and do not count toward the
+// cap, so pinning never eats into the history budget.
 function pruneHistory(history, maxEntries, maxAgeDays) {
   var values = Array.isArray(history) ? history : []
   var max = Math.max(1, Number(maxEntries) || 200)
   var days = Number(maxAgeDays) || 0
   var next = []
+  var unpinned = 0
 
   var cutoff = days > 0 ? Date.now() - days * 86400000 : 0
-  for (var i = 0; i < values.length && next.length < max; i++) {
+  for (var i = 0; i < values.length; i++) {
     var entry = normalizeEntry(values[i])
     if (!entry) continue
-    if (cutoff > 0 && !entry.pinned) {
+    if (entry.pinned) { next.push(entry); continue }
+    if (unpinned >= max) continue
+    if (cutoff > 0) {
       var ts = Date.parse(String(entry.createdAt || ""))
       if (!isNaN(ts) && ts < cutoff) continue
     }
     next.push(entry)
+    unpinned++
   }
   return next
 }
 
+// Add (or bump) an entry. `limit` caps the unpinned entries only; pinned ones
+// are always carried over.
 function addEntry(history, entry, limit) {
   var normalized = normalizeEntry(entry)
   var max = Math.max(0, Number(limit) || 0)
-  if (!normalized || max === 0) return []
+  var values = Array.isArray(history) ? history : []
+  if (!normalized || max === 0) return clearUnpinned(values)
 
   var key = entryKey(normalized)
   var wasPinned = false
-  var values = Array.isArray(history) ? history : []
   for (var i = 0; i < values.length; i++) {
     var existing = normalizeEntry(values[i])
     if (existing && entryKey(existing) === key) {
@@ -113,24 +124,31 @@ function addEntry(history, entry, limit) {
       var inPlace = normalizeEntry(kept[k])
       if (inPlace && entryKey(inPlace) === key) {
         kept[k] = normalized
-        return kept.slice(0, max)
+        return kept
       }
     }
   }
 
   var next = [normalized]
-  for (var j = 0; j < values.length && next.length < max; j++) {
+  var unpinned = 1
+  for (var j = 0; j < values.length; j++) {
     var other = normalizeEntry(values[j])
     if (!other || entryKey(other) === key) continue
+    if (other.pinned) { next.push(other); continue }
+    if (unpinned >= max) continue
     next.push(other)
+    unpinned++
   }
   return next
 }
 
+// Remove the entry at `index`. Pinned entries are not removable — unpin first.
 function removeEntryAt(history, index) {
   var values = Array.isArray(history) ? history : []
   var target = Number(index)
   if (isNaN(target) || target < 0 || target >= values.length) return values.slice()
+  var entry = normalizeEntry(values[target])
+  if (entry && entry.pinned) return values.slice()
   var next = values.slice()
   next.splice(target, 1)
   return next

@@ -37,10 +37,11 @@ a terminal's tty instead of synthesising a keystroke.
   password managers.
 - **Search and filters**: all, text, links, images, colors.
 - **Preview pane** for the full text or the image.
-- **Pinned entries** stay on top, in your own order.
+- **Pinned entries** stay on top, in your own order, and are never removed —
+  not by Delete, not by clear, not by the size or age limits — until you unpin.
 - **Pastes into terminals properly**, not with a fake `Ctrl+V`.
 - **Actions menu**: open a link, edit a copy, save an image, remove.
-- **Keeps 200 entries**, or fewer days if you set a limit.
+- **Keeps 200 unpinned entries**, or fewer days if you set a limit.
 
 ## <img src="icons/keyboard.png" width="20" alt=""> Keys
 
@@ -54,7 +55,7 @@ a terminal's tty instead of synthesising a keystroke.
   <tr><td width="28"><img src="icons/eye.png" width="18" alt=""></td><td><code>Ctrl+O</code></td><td>Toggle the preview pane</td></tr>
   <tr><td width="28"><img src="icons/dots-three.png" width="18" alt=""></td><td><code>Ctrl+.</code></td><td>Actions menu</td></tr>
   <tr><td width="28"><img src="icons/push-pin.png" width="18" alt=""></td><td><code>Ctrl+P</code> · <code>Shift+Ctrl+J</code> <code>Shift+Ctrl+K</code></td><td>Pin / unpin · reorder the shelf</td></tr>
-  <tr><td width="28"><img src="icons/trash.png" width="18" alt=""></td><td><code>Delete</code> <code>Ctrl+D</code></td><td>Remove the selected entry</td></tr>
+  <tr><td width="28"><img src="icons/trash.png" width="18" alt=""></td><td><code>Delete</code> <code>Ctrl+D</code></td><td>Remove the selected entry (pinned entries must be unpinned first)</td></tr>
   <tr><td width="28"><img src="icons/broom.png" width="18" alt=""></td><td><code>Shift+Delete</code></td><td>Clear every unpinned entry</td></tr>
   <tr><td width="28"><img src="icons/gear.png" width="18" alt=""></td><td><code>Ctrl+,</code></td><td>Settings</td></tr>
   <tr><td width="28"><img src="icons/question.png" width="18" alt=""></td><td><code>?</code></td><td>Keyboard reference</td></tr>

@@ -84,7 +84,7 @@ Item {
   property int cardWidth: Math.min(Style.space(720), panel.width - Style.gapsOut * 2)
   property int cardHeight: Math.min(Style.space(600), panel.height - Style.gapsOut * 2)
   property int rowHeight: Style.space(42)
-  property int historyLimit: 200   // max entries; oldest deleted beyond this
+  property int historyLimit: 200   // max unpinned entries; oldest deleted beyond this
   // Delete unpinned entries older than this many days. 0 turns automatic cleanup
   // off. Pinned entries are never removed. Editable in the settings page (Ctrl+,)
   // and persisted next to the history.
@@ -355,7 +355,8 @@ Item {
 
   function removeSelected() {
     var row = rowAt(selectedIndex)
-    if (!row) return
+    // Pinned entries cannot be removed by any action; unpin first.
+    if (!row || row.pinned) return
     root.history = YankHistory.removeEntryAt(root.history, row.historyIndex)
     root.saveHistory()
     root.rebuildDisplay()
@@ -475,7 +476,8 @@ Item {
     add("pin", row.pinned ? "Unpin entry" : "Pin entry", "Ctrl+P")
     add("paste", "Paste", "Enter")
     add("copy", "Copy", "Shift+Enter")
-    add("remove", "Remove entry", "Del")
+    // Pinned entries cannot be removed; the menu offers "Unpin entry" instead.
+    if (!row.pinned) add("remove", "Remove entry", "Del")
 
     if (root.actionIndex >= actionsModel.count) root.actionIndex = Math.max(0, actionsModel.count - 1)
 
@@ -834,8 +836,8 @@ Item {
             event.accepted = true
           } else if (event.key === Qt.Key_D && (event.modifiers & Qt.ControlModifier)) {
             // Ctrl+D is the same action as Delete, for people whose habit is
-            // Ctrl+D. Both work on pinned entries too; Shift+Delete is the one
-            // that clears every unpinned entry at once.
+            // Ctrl+D. Neither touches a pinned entry (unpin first); Shift+Delete
+            // is the one that clears every unpinned entry at once.
             if (event.modifiers & Qt.ShiftModifier) root.clearUnpinned()
             else root.removeSelected()
             event.accepted = true
@@ -1853,7 +1855,7 @@ Item {
                 title: "ORGANIZE"
                 rows: [
                   { keys: ["Ctrl+P"], label: "pin / unpin" },
-                  { keys: ["Delete", "Ctrl+D"], label: "remove entry" },
+                  { keys: ["Delete", "Ctrl+D"], label: "remove unpinned entry" },
                   { keys: ["Shift+Delete"], label: "clear unpinned" },
                   { keys: ["Ctrl+."], label: "actions menu" }
                 ]
