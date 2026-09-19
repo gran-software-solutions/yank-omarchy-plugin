@@ -36,10 +36,14 @@ a terminal's tty instead of synthesising a keystroke.
 - **Catches everything you copy**, text and images, in the background. Skips
   password managers.
 - **Search and filters**: all, text, links, images, colors.
-- **Preview pane** for the full text or the image.
+- **Detail pane** beside the list shows the focused entry in full: the image at
+  size with its dimensions, the whole text, or a large colour swatch. The panel
+  opens on your most recent copy, so what you just copied is already on screen.
 - **Pinned entries** stay on top, in your own order, and are never removed —
   not by Delete, not by clear, not by the size or age limits — until you unpin.
-- **Pastes into terminals properly**, not with a fake `Ctrl+V`.
+- **Pastes into terminals properly**, not with a fake `Ctrl+V`. Images are
+  pasted with `Ctrl+V`, which is what terminal apps such as Claude Code read an
+  image from.
 - **Actions menu**: open a link, edit a copy, save an image, remove.
 - **Keeps 200 unpinned entries**, or fewer days if you set a limit.
 - **Bounded size**: a copy over 1 MB of text or 20 MB of image is not recorded
@@ -56,7 +60,7 @@ a terminal's tty instead of synthesising a keystroke.
   <tr><td width="28"><img src="icons/funnel.png" width="18" alt=""></td><td><code>Tab</code> · <code>Ctrl+H</code> <code>Ctrl+L</code> · <code>Ctrl+1–5</code></td><td>Switch filter</td></tr>
   <tr><td width="28"><img src="icons/arrow-elbow-down-left.png" width="18" alt=""></td><td><code>Enter</code></td><td>Paste into the focused window</td></tr>
   <tr><td width="28"><img src="icons/copy.png" width="18" alt=""></td><td><code>Shift+Enter</code></td><td>Copy only, without pasting</td></tr>
-  <tr><td width="28"><img src="icons/eye.png" width="18" alt=""></td><td><code>Ctrl+O</code></td><td>Toggle the preview pane</td></tr>
+  <tr><td width="28"><img src="icons/eye.png" width="18" alt=""></td><td><code>Ctrl+O</code></td><td>Show or hide the detail pane</td></tr>
   <tr><td width="28"><img src="icons/dots-three.png" width="18" alt=""></td><td><code>Ctrl+.</code></td><td>Actions menu</td></tr>
   <tr><td width="28"><img src="icons/push-pin.png" width="18" alt=""></td><td><code>Ctrl+P</code> · <code>Shift+Ctrl+J</code> <code>Shift+Ctrl+K</code></td><td>Pin / unpin · reorder the shelf</td></tr>
   <tr><td width="28"><img src="icons/trash.png" width="18" alt=""></td><td><code>Delete</code> <code>Ctrl+D</code></td><td>Remove the selected entry (pinned entries must be unpinned first)</td></tr>
@@ -148,6 +152,8 @@ reinstalling the plugin keeps your history.
 
 The install is a plain git checkout, so edit it in place — the shell
 hot-reloads on save, or force it with `omarchy-shell shell rescanPlugins`.
+Changes to `YankHistory.js` are not picked up by the hot reload (the engine
+keeps the imported script cached); run `omarchy-restart-shell` for those.
 
 To work from a checkout somewhere else instead, symlink it into the plugins
 folder:

@@ -14,7 +14,14 @@
 # The text arrives on stdin rather than as an argument: the kernel caps a single
 # argument at 128 KiB, which a long clipboard entry can exceed.
 #
+# Images take a third route: the clipboard is set to the image and every window,
+# terminals included, gets a plain Ctrl+V. In a terminal that keystroke reaches
+# the program running inside it, which is how TUI apps such as Claude Code pick
+# an image up from the clipboard; Ctrl+Shift+V or Shift+Insert would make the
+# terminal paste text itself and the image would never arrive.
+#
 # Usage: paste.sh [--copy-only] < text
+#        paste.sh [--copy-only] --image <mime> <path>
 
 set -u
 
@@ -22,6 +29,20 @@ copy_only=""
 if [ "${1:-}" = "--copy-only" ]; then
   copy_only=1
   shift
+fi
+
+if [ "${1:-}" = "--image" ]; then
+  mime="${2:-}"
+  path="${3:-}"
+  [ -n "$mime" ] && [ -r "$path" ] || exit 1
+  wl-copy --type "$mime" <"$path" >/dev/null 2>&1
+  [ -n "$copy_only" ] && exit 0
+  sleep 0.18
+  for _ in 1 2 3; do
+    wtype -M ctrl -k v -m ctrl 2>/dev/null && break
+    sleep 0.12
+  done
+  exit 0
 fi
 
 if [ $# -gt 0 ]; then

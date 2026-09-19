@@ -68,7 +68,7 @@ Item {
   // Sized to the reference, measured from the rendered popup: three columns of
   // title + four rows plus the trailing actions line come to ~150 logical px.
   // Undersizing clipped the right-hand labels; oversizing left dead space.
-  readonly property int helpPopupWidth: Style.space(700)
+  readonly property int helpPopupWidth: Style.space(880)
   readonly property int helpPopupHeight: Style.space(180)
   // Help popup over the card, opened by the ? in the header.
   property bool helpOpen: false
@@ -81,9 +81,11 @@ Item {
     root.helpOpen = true
   }
   property int contentSpacing: Style.space(6)
-  property int cardWidth: Math.min(Style.space(720), panel.width - Style.gapsOut * 2)
+  property int cardWidth: Math.min(Style.space(960), panel.width - Style.gapsOut * 2)
   property int cardHeight: Math.min(Style.space(600), panel.height - Style.gapsOut * 2)
-  property int rowHeight: Style.space(42)
+  property int rowHeight: Style.space(48)
+  // "Copied 5m ago" labels read this, so they tick while the panel is open.
+  property double now: Date.now()
   property int historyLimit: 200   // max unpinned entries; oldest deleted beyond this
   // Delete unpinned entries older than this many days. 0 turns automatic cleanup
   // off. Pinned entries are never removed. Editable in the settings page (Ctrl+,)
@@ -93,8 +95,8 @@ Item {
   // Kept as text so a half-typed number is not clamped mid-keystroke.
   property string retentionDraft: "30"
 
-  property bool previewOpen: false // explicit: Ctrl+O or the row chevron
-  property bool previewAuto: false // true when opened for an image automatically
+  // The detail pane shows the focused entry; Ctrl+O hides it for a wider list.
+  property bool previewOpen: true
   readonly property int previewPadding: Style.space(11)
   property color rowHover: Util.alpha(root.foreground, 0.045)
   property color accentSoft: Util.alpha(Color.accent, 0.14)
@@ -112,12 +114,15 @@ Item {
     root.filterText = ""
     root.filterKind = "all"
     root.selectedIndex = 0
-    root.cursorActive = false
-    root.previewOpen = false
-    root.previewAuto = false
+    // The newest entry is focused straight away, so what you just copied is
+    // on screen in the detail pane the moment the panel opens.
+    root.cursorActive = true
+    root.now = Date.now()
     root.helpOpen = false
     root.closeActions()
     root.rebuildDisplay()
+    // Start on the most recent copy rather than the first pinned entry.
+    if (displayModel.count > 0) root.selectedIndex = pinnedModel.count
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
@@ -239,32 +244,8 @@ Item {
       resultList.positionViewAtIndex(idx - pinnedModel.count, ListView.Contain)
   }
 
-  function canPreview(row) {
-    if (!row) return false
-    if (row.entryType === "image") return true
-    return String(row.previewText || "").length > 0
-  }
-
-  // The preview is never shown on its own: it opens on Ctrl+O or by
-  // clicking a row's chevron, so long entries cannot ambush the user.
   function togglePreview() {
-    root.previewAuto = false
-    if (!canPreview(rowAt(root.selectedIndex))) { root.previewOpen = false; return }
     root.previewOpen = !root.previewOpen
-  }
-
-  // Images are worth seeing the moment they are selected; text stays opt-in.
-  // An auto-opened preview closes again when the selection leaves images, but
-  // a preview the user opened deliberately is left alone.
-  function syncPreviewToSelection() {
-    var row = root.cursorActive ? rowAt(root.selectedIndex) : null
-    if (row && row.entryType === "image") {
-      root.previewOpen = true
-      root.previewAuto = true
-    } else if (root.previewAuto) {
-      root.previewOpen = false
-      root.previewAuto = false
-    }
   }
 
   function rebuildDisplay() {
@@ -282,8 +263,6 @@ Item {
     else if (selectedIndex < 0) selectedIndex = 0
 
     Qt.callLater(function() {
-      // models are populated now, so the selection can be inspected safely
-      syncPreviewToSelection()
       if (root.selectedIndex >= pinnedModel.count && resultList.count > 0)
         resultList.positionViewAtIndex(root.selectedIndex - pinnedModel.count, ListView.Beginning)
     })
@@ -304,6 +283,9 @@ Item {
       previewImage: row.previewImage ? Util.fileUrl(row.previewImage) : "",
       path: row.path,
       mime: row.mime,
+      kind: row.kind,
+      createdAt: row.createdAt,
+      bytes: row.bytes,
       historyIndex: row.index
     })
   }
@@ -339,18 +321,14 @@ Item {
   function setFilter(nextFilter) {
     root.filterText = nextFilter
     root.selectedIndex = 0
-    // Arm the cursor on the top result. Without this the first Enter after
-    // typing only arms it and appears to do nothing, which reads as "paste is
-    // broken" when the list is plainly right there.
-    root.cursorActive = nextFilter.length > 0
+    root.cursorActive = true
     root.rebuildDisplay()
   }
 
   function setFilterKind(kind) {
     root.filterKind = kind
     root.selectedIndex = 0
-    root.cursorActive = root.filterText.length > 0
-    root.previewOpen = false
+    root.cursorActive = true
     root.rebuildDisplay()
   }
 
@@ -384,7 +362,7 @@ Item {
     root.history = YankHistory.clearUnpinned(root.history)
     root.saveHistory()
     root.selectedIndex = 0
-    root.cursorActive = false
+    root.cursorActive = true
     root.rebuildDisplay()
   }
 
@@ -398,11 +376,9 @@ Item {
     if (!row) return
     root.opened = false
     if (row.entryType === "image") {
-      var args = [root.omarchyPath + "/bin/omarchy-clipboard-paste-file"]
+      var args = ["bash", root.pasteScript]
       if (copyOnly) args.push("--copy-only")
-      args.push(row.mime)
-      args.push(row.path)
-      Quickshell.execDetached(args)
+      Quickshell.execDetached(args.concat(["--image", row.mime, row.path]))
       return
     }
     // Copy via wl-copy. We deliberately avoid `wtype "$text"`
@@ -528,8 +504,6 @@ Item {
     if (index < 0 || index >= actionsModel.count) return
     root.runActionById(actionsModel.get(index).actionId)
   }
-
-  onSelectedIndexChanged: root.syncPreviewToSelection()
 
   Component.onCompleted: initProc.running = true
 
@@ -733,6 +707,13 @@ Item {
     }
   }
 
+  Timer {
+    interval: 30000
+    repeat: true
+    running: root.opened
+    onTriggered: root.now = Date.now()
+  }
+
   // Enforce maxAgeDays for long-running sessions (entries expire over time).
   Timer {
     interval: 3600000
@@ -835,7 +816,6 @@ Item {
           // ---- main keys ----
           if (event.key === Qt.Key_Escape) {
             if (root.helpOpen) root.helpOpen = false
-            else if (root.previewOpen) root.previewOpen = false
             else if (root.filterText) root.setFilter("")
             else root.close()
             event.accepted = true
@@ -929,678 +909,727 @@ Item {
         anchors.rightMargin: card.contentRightInset
         anchors.bottomMargin: card.contentBottomInset
         anchors.leftMargin: card.contentLeftInset
-        spacing: root.contentSpacing
+        spacing: 0
 
-        // ---- search + filter panel (matches the shortcut panel language) ----
-        Rectangle {
-          id: controlPanel
+        // ---- header: search field + kind chips on one line ----
+        Item {
+          id: header
           width: parent.width
-          height: controlColumn.implicitHeight + Style.space(22)
-          radius: Style.space(9)
-          color: root.background
-          border.color: Util.alpha(root.border, 0.3)
-          border.width: 1
+          height: root.headerHeight + Style.space(14)
 
-          Column {
-            id: controlColumn
+          Rectangle {
+            id: searchField
             anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.margins: Style.space(11)
-            spacing: Style.space(8)
+            anchors.right: kindChips.left
+            anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            height: root.headerHeight
+            radius: Style.space(8)
+            color: Util.alpha(root.foreground, 0.05)
+            border.width: 1
+            border.color: root.filterText.length > 0
+                          ? Util.alpha(Color.accent, 0.55)
+                          : Util.alpha(root.foreground, 0.10)
+            Behavior on border.color { ColorAnimation { duration: 120 } }
 
-            // panel header: label + result count
-            Item {
-              width: parent.width
-              height: root.metaFont + Style.space(3)
-
-              Text {
-                textFormat: Text.PlainText
-                text: "SEARCH  &  FILTER"
-                color: root.foreground
-                opacity: 0.45
-                font.family: root.fontFamily
-                font.pixelSize: root.metaFont
-                font.letterSpacing: 1.5
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Row {
-                anchors.right: headerSettings.left
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(7)
-
-                // Where the cursor sits in the visible list. Only meaningful once
-                // a cursor exists, so it appears when you start moving rather than
-                // adding noise to the resting panel.
-                Text {
-                  textFormat: Text.PlainText
-                  visible: root.cursorActive
-                  text: root.positionLabel
-                  color: root.selectedText
-                  font.family: root.fontFamily
-                  font.pixelSize: root.metaFont
-                  font.weight: Font.DemiBold
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Rectangle {
-                  visible: root.cursorActive
-                  width: 1
-                  height: Style.space(10)
-                  color: Util.alpha(root.foreground, 0.18)
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-
-                Text {
-                  textFormat: Text.PlainText
-                  text: root.combinedCount === root.history.length
-                        ? root.combinedCount + " items"
-                        : root.combinedCount + " of " + root.history.length
-                  color: root.foreground
-                  opacity: 0.35
-                  font.family: root.fontFamily
-                  font.pixelSize: root.metaFont
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-              }
-
-              // Settings affordance: a gear that opens the settings panel.
-              Item {
-                id: headerSettings
-                width: Style.space(18)
-                height: width
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-
-                Rectangle {
-                  anchors.fill: parent
-                  radius: width / 2
-                  color: settingsArea.containsMouse || root.helpOpen
-                         ? Util.alpha(root.border, 0.16) : "transparent"
-                  Behavior on color { ColorAnimation { duration: 110 } }
-                }
-
-                Text {
-                  anchors.centerIn: parent
-                  text: "\u{F0493}"   // nf-md-cog
-                  color: root.helpOpen ? root.selectedText : root.chevron
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                }
-
-                MouseArea {
-                  id: settingsArea
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: root.openHelp("settings")
-                }
-              }
+            Text {
+              id: searchIcon
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(11)
+              anchors.verticalCenter: parent.verticalCenter
+              text: "󰍉"
+              color: root.filterText.length > 0 ? Color.accent : root.foreground
+              opacity: root.filterText.length > 0 ? 1 : 0.4
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
             }
 
-            // search field
+            Text {
+              anchors.left: searchIcon.right
+              anchors.leftMargin: Style.space(9)
+              anchors.right: clearButton.left
+              anchors.rightMargin: Style.space(6)
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.PlainText
+              text: root.filterText || "Type to search your clipboard"
+              color: root.foreground
+              opacity: root.filterText.length > 0 ? 1 : 0.38
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.subtitle
+              elide: Text.ElideLeft
+            }
+
+            // typing caret, so it is obvious keystrokes land here
             Rectangle {
-              id: searchField
-              width: parent.width
-              height: root.headerHeight
-              radius: Style.space(8)
-              color: Util.alpha(root.border, 0.06)
-              border.width: 1
-              border.color: root.filterText.length > 0
-                            ? Util.alpha(Color.accent, 0.5)
-                            : Util.alpha(root.border, 0.16)
-              Behavior on border.color { ColorAnimation { duration: 120 } }
+              visible: root.filterText.length > 0
+              width: 1.5
+              height: Style.font.subtitle + 2
+              color: Color.accent
+              x: searchIcon.x + searchIcon.width + Style.space(9) + searchMeasure.width + 1
+              anchors.verticalCenter: parent.verticalCenter
+              SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                running: root.opened && root.filterText.length > 0
+                NumberAnimation { to: 0; duration: 530; easing.type: Easing.InQuad }
+                NumberAnimation { to: 1; duration: 530; easing.type: Easing.OutQuad }
+              }
+            }
+            TextMetrics {
+              id: searchMeasure
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.subtitle
+              text: root.filterText
+            }
 
-              Row {
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(11)
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(8)
+            Rectangle {
+              id: clearButton
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.filterText.length > 0
+              width: visible ? Style.space(18) : 0
+              height: Style.space(18)
+              radius: height / 2
+              color: clearArea.containsMouse ? Util.alpha(root.foreground, 0.16) : Util.alpha(root.foreground, 0.07)
 
-                Text {
-                  id: searchIcon
-                  text: "󰍉"
-                  color: root.filterText.length > 0 ? Color.accent : root.foreground
-                  opacity: root.filterText.length > 0 ? 1 : 0.45
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.title
-                  anchors.verticalCenter: parent.verticalCenter
-                }
+              Text {
+                anchors.centerIn: parent
+                text: "✕"
+                color: root.foreground
+                opacity: 0.65
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
 
-                Text {
-                  id: searchInput
-                  textFormat: Text.PlainText
-                  width: Math.max(0, parent.width - searchIcon.width - clearButton.width - parent.spacing * 2)
-                  text: root.filterText || "Search clipboard…"
-                  color: root.foreground
-                  opacity: root.filterText.length > 0 ? 1 : 0.42
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  elide: Text.ElideRight
-                  anchors.verticalCenter: parent.verticalCenter
-                }
+              MouseArea {
+                id: clearArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.setFilter("")
+              }
+            }
+          }
 
-                Rectangle {
-                  id: clearButton
-                  visible: root.filterText.length > 0
-                  width: visible ? Style.space(17) : 0
-                  height: width
-                  radius: width / 2
-                  color: clearArea.containsMouse ? Util.alpha(root.border, 0.3) : Util.alpha(root.border, 0.13)
-                  anchors.verticalCenter: parent.verticalCenter
+          // kind chips: a compact segmented control
+          Rectangle {
+            id: kindChips
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            height: root.headerHeight
+            width: chipsRow.implicitWidth + Style.space(6)
+            radius: Style.space(8)
+            color: Util.alpha(root.foreground, 0.05)
+            border.width: 1
+            border.color: Util.alpha(root.foreground, 0.10)
 
-                  Text {
+            Row {
+              id: chipsRow
+              anchors.centerIn: parent
+              spacing: Style.space(2)
+
+              Repeater {
+                model: root.kinds
+
+                delegate: Rectangle {
+                  id: chip
+                  required property var modelData
+                  readonly property bool active: root.filterKind === modelData.id
+                  readonly property bool hovered: chipArea.containsMouse
+
+                  height: root.headerHeight - Style.space(6)
+                  width: chipLabel.implicitWidth + Style.space(active ? 32 : 20) + (active ? chipGlyph.implicitWidth : 0)
+                  radius: Style.space(6)
+                  color: active ? root.background : (hovered ? Util.alpha(root.foreground, 0.06) : "transparent")
+                  border.width: active ? 1 : 0
+                  border.color: Util.alpha(root.foreground, 0.12)
+                  Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                  Behavior on color { ColorAnimation { duration: 110 } }
+
+                  Row {
                     anchors.centerIn: parent
-                    text: "✕"
-                    color: root.foreground
-                    opacity: 0.7
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
+                    spacing: Style.space(6)
+
+                    Text {
+                      id: chipGlyph
+                      visible: chip.active
+                      text: chip.modelData.glyph
+                      color: Color.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    Text {
+                      id: chipLabel
+                      textFormat: Text.PlainText
+                      text: chip.modelData.label
+                      color: root.foreground
+                      opacity: chip.active ? 1 : (chip.hovered ? 0.8 : 0.5)
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      font.weight: chip.active ? Font.DemiBold : Font.Normal
+                      anchors.verticalCenter: parent.verticalCenter
+                    }
                   }
 
                   MouseArea {
-                    id: clearArea
+                    id: chipArea
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.setFilter("")
+                    onClicked: root.setFilterKind(chip.modelData.id)
                   }
                 }
-              }
-            }
-
-            // filter tabs
-            Item {
-              width: parent.width
-              height: root.chipsHeight
-
-              Row {
-                id: tabsRow
-                anchors.left: parent.left
-                anchors.verticalCenter: parent.verticalCenter
-                height: parent.height
-                spacing: Style.space(22)
-
-                Repeater {
-                  model: root.kinds
-
-                  delegate: Item {
-                    id: tab
-                    required property var modelData
-                    readonly property bool active: root.filterKind === modelData.id
-                    readonly property bool hovered: tabArea.containsMouse
-
-                    width: tabRow.implicitWidth
-                    height: parent.height
-
-                    Row {
-                      id: tabRow
-                      anchors.horizontalCenter: parent.horizontalCenter
-                      anchors.top: parent.top
-                      anchors.topMargin: Style.space(3)
-                      spacing: Style.space(6)
-
-                      Text {
-                        text: tab.modelData.glyph
-                        color: tab.active ? Color.accent : root.foreground
-                        opacity: tab.active ? 1 : (tab.hovered ? 0.75 : 0.4)
-                        Behavior on opacity { NumberAnimation { duration: 110 } }
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
-                        anchors.verticalCenter: parent.verticalCenter
-                      }
-
-                      Text {
-                        id: tabLabel
-                        textFormat: Text.PlainText
-                        text: tab.modelData.label.toUpperCase()
-                        color: tab.active ? Color.accent : root.foreground
-                        opacity: tab.active ? 1 : (tab.hovered ? 0.75 : 0.45)
-                        Behavior on opacity { NumberAnimation { duration: 110 } }
-                        font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
-                        font.letterSpacing: 1.6
-                        font.weight: tab.active ? Font.DemiBold : Font.Normal
-                        anchors.verticalCenter: parent.verticalCenter
-                      }
-                    }
-
-                    MouseArea {
-                      id: tabArea
-                      anchors.fill: parent
-                      anchors.margins: -Style.space(6)
-                      hoverEnabled: true
-                      cursorShape: Qt.PointingHandCursor
-                      onClicked: root.setFilterKind(tab.modelData.id)
-                    }
-                  }
-                  }
               }
             }
           }
         }
-        // ---- entries card ----
-        Rectangle {
-          id: entryCard
+
+        Rectangle { width: parent.width; height: 1; color: Util.alpha(root.foreground, 0.08) }
+
+        // ---- body: list | detail ----
+        Item {
+          id: contentArea
           width: parent.width
-          height: parent.height - controlPanel.height - root.contentSpacing
-          radius: Style.space(9)
-          color: root.background
-          border.color: Util.alpha(root.border, 0.3)
-          border.width: 1
+          height: parent.height - header.height - footer.height - 2
 
+          component EntryRow: Rectangle {
+            id: entryRow
+            required property int index
+            required property string entryType
+            required property bool pinned
+            required property string previewText
+            required property string fullText
+            required property bool isLink
+            required property bool isColor
+            required property string previewImage
+            required property string mime
+            required property string kind
+            required property string createdAt
+            required property real bytes
+            property int base
 
-          Item {
-            id: contentArea
-  anchors.fill: parent
-  anchors.margins: Style.space(8)
-            width: parent.width
+            readonly property bool hasCursor: root.cursorActive && base + index === root.selectedIndex
+            readonly property bool hovered: rowHoverArea.containsMouse
 
-            component EntryRow: Rectangle {
-              id: entryRow
-              required property int index
-              required property string entryType
-              required property bool pinned
-              required property string previewText
-              required property string fullText
-              required property bool isLink
-              required property bool isColor
-              required property bool isEmail
-              required property bool isPath
-              required property bool isCode
-              required property string previewImage
-              property int base
+            width: ListView.view.width
+            height: root.rowHeight
+            radius: Style.space(7)
+            color: hasCursor ? root.selectedBackground : (hovered ? root.rowHover : "transparent")
+            Behavior on color { ColorAnimation { duration: 90 } }
 
-              readonly property bool hasCursor: root.cursorActive && base + index === root.selectedIndex
-              readonly property bool hovered: rowHoverArea.containsMouse
-
-              width: ListView.view.width
-              height: root.rowHeight
-              radius: Style.space(6)
-              color: hasCursor ? root.selectedBackground : (hovered ? root.rowHover : "transparent")
-              Behavior on color { ColorAnimation { duration: 90 } }
-
-              // accent marker for the focused row
-              Rectangle {
-                visible: entryRow.hasCursor
-                width: 3
-                height: parent.height * 0.5
-                radius: 1.5
-                color: Color.accent
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(5)
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              Row {
-                anchors.fill: parent
-                anchors.leftMargin: Style.space(14)
-                anchors.rightMargin: entryRow.pinned ? Style.space(44) : Style.space(32)
-                spacing: Style.space(11)
-
-                // fixed-width icon column keeps every title on the same x
-                Item {
-                  id: iconColumn
-                  width: Style.space(26)
-                  height: parent.height
-                  anchors.verticalCenter: parent.verticalCenter
-
-                  Rectangle {
-                    visible: entryRow.entryType === "image"
-                    width: Style.space(24)
-                    height: width
-                    radius: Style.space(5)
-                    anchors.centerIn: parent
-                    color: Util.alpha(root.border, entryRow.hasCursor ? 0.2 : 0.08)
-                    clip: true
-                    border.color: Util.alpha(root.border, 0.28)
-                    border.width: 1
-
-                    Image {
-                      anchors.fill: parent
-                      anchors.margins: 2
-                      source: entryRow.previewImage
-                      fillMode: Image.PreserveAspectFit
-                      asynchronous: true
-                      smooth: true
-                    }
-                  }
-
-                  Rectangle {
-                    visible: entryRow.isColor === true
-                    width: Style.space(15)
-                    height: width
-                    radius: width / 2
-                    anchors.centerIn: parent
-                    color: entryRow.isColor === true && !!entryRow.fullText ? entryRow.fullText.trim() : "transparent"
-                    border.color: Util.alpha(root.foreground, 0.3)
-                    border.width: 1
-                  }
-
-                  Text {
-                    visible: entryRow.entryType !== "image" && !entryRow.isColor
-                    text: {
-                      if (entryRow.isLink === true) return "󰌹"
-                      if (entryRow.isEmail === true) return "󰇮"
-                      if (entryRow.isPath === true) return "󰉋"
-                      if (entryRow.isCode === true) return "󰘦"
-                      return "󰏫"
-                    }
-                    color: {
-                      if (entryRow.hasCursor) return root.selectedText
-                      if (entryRow.pinned || entryRow.isLink === true) return Color.accent
-                      return Color.muted
-                    }
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.title
-                    anchors.centerIn: parent
-                  }
-                }
-
-                Text {
-                  id: titleText
-                  textFormat: Text.PlainText
-                  width: parent.width - iconColumn.width - parent.spacing
-                  text: entryRow.previewText
-                  color: {
-                    if (entryRow.hasCursor) return root.selectedText
-                    if (entryRow.isLink === true) return Color.accent
-                    return root.foreground
-                  }
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  elide: Text.ElideRight
-                  anchors.verticalCenter: parent.verticalCenter
-
-                }
-              }
-
-              // preview affordance for values that do not fit the row
+            // accent marker for the focused row
             Rectangle {
-              id: previewChevron
-              visible: titleText.truncated || entryRow.entryType === "image"
-              width: Style.space(18)
-              height: width
-              radius: width / 2
-              anchors.right: parent.right
-              anchors.rightMargin: Style.space(8)
-              anchors.verticalCenter: parent.verticalCenter
-              color: chevronArea.containsMouse ? Util.alpha(root.border, 0.28)
-                                               : (entryRow.hasCursor ? Util.alpha(root.border, 0.16) : "transparent")
-
-              Text {
-                anchors.centerIn: parent
-                text: entryRow.entryType === "image" ? "\uF02E9" : "\u203A"
-                color: entryRow.hasCursor ? Color.accent : root.foreground
-                opacity: 0.6
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-
-              MouseArea {
-                id: chevronArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                  hoverDwell.stop()
-                  root.cursorActive = true
-                  root.selectedIndex = entryRow.base + entryRow.index
-                  root.previewAuto = false
-                  root.previewOpen = true
-                }
-              }
-            }
-
-            // trailing pin marker (the caption that used to say "pinned" is gone)
-              Text {
-                visible: entryRow.pinned && !entryRow.hasCursor
-                text: "󰐃"
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(10)
-                anchors.verticalCenter: parent.verticalCenter
-                color: Color.accent
-                opacity: 0.45
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-
-              // Hovering must not flash the preview pane: selection only follows
-              // the pointer after a short dwell, so sweeping across long entries
-              // no longer pops a translucent pane in and out.
-              Timer {
-                id: hoverDwell
-                interval: 320
-                repeat: false
-                onTriggered: {
-                  if (!root.hoverAllowed) return
-                  root.cursorActive = true
-                  root.selectedIndex = entryRow.base + entryRow.index
-                }
-              }
-
-              MouseArea {
-                id: rowHoverArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onEntered: {
-                  if (!root.hoverAllowed) return
-                  hoverDwell.restart()
-                }
-                onExited: hoverDwell.stop()
-                onClicked: {
-                  hoverDwell.stop()
-                  root.cursorActive = true
-                  root.selectedIndex = entryRow.base + entryRow.index
-                  root.activateSelected(false)
-                }
-              }
-            }
-
-            // ---- list column: yields width when the preview is open ----
-            Item {
-              id: listColumn
+              visible: entryRow.hasCursor
+              width: 3
+              height: parent.height * 0.46
+              radius: 1.5
+              color: Color.accent
               anchors.left: parent.left
-              anchors.top: parent.top
-              anchors.bottom: parent.bottom
-              width: parent.width - (root.previewOpen && root.canPreview(previewPane.activeRow) ? previewPane.width : 0)
-              Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-
-              // ---- sticky pinned block ----
-              Column {
-                id: pinnedArea
-                anchors.top: parent.top
-                anchors.left: parent.left
-                anchors.right: parent.right
-                visible: pinnedModel.count > 0
-                spacing: Style.space(4)
-
-                Text {
-                  textFormat: Text.PlainText
-                  text: "PINNED  ·  " + pinnedModel.count
-                  color: Color.accent
-                  opacity: 0.75
-                  font.family: root.fontFamily
-                  font.pixelSize: root.metaFont
-                  font.letterSpacing: 1.6
-                  leftPadding: Style.space(14)
-                }
-
-                ListView {
-                  id: pinnedList
-                  width: parent.width
-                  height: contentHeight
-                  interactive: false
-                  model: pinnedModel
-                  clip: true
-                  spacing: Style.space(4)
-
-                  delegate: EntryRow { base: 0 }
-                }
-              }
-
-              // ---- recent header ----
-              Column {
-                id: recentHeader
-                anchors.top: pinnedArea.visible ? pinnedArea.bottom : parent.top
-                anchors.topMargin: pinnedArea.visible ? Style.space(6) : 0
-                anchors.left: parent.left
-                anchors.right: parent.right
-                visible: displayModel.count > 0
-
-                Rectangle {
-                  visible: pinnedArea.visible
-                  width: parent.width
-                  height: Style.normalBorderWidth
-                  color: Util.alpha(root.border, 0.28)
-                }
-
-                Text {
-                  textFormat: Text.PlainText
-                  text: "RECENT  ·  " + displayModel.count
-                  color: root.foreground
-                  opacity: 0.42
-                  font.family: root.fontFamily
-                  font.pixelSize: root.metaFont
-                  font.letterSpacing: 1.6
-                  topPadding: Style.space(4)
-                  leftPadding: Style.space(14)
-                }
-              }
-
-              ListView {
-                id: resultList
-                anchors.top: recentHeader.visible ? recentHeader.bottom : recentHeader.top
-                anchors.topMargin: Style.space(2)
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                model: displayModel
-                clip: true
-                spacing: Style.space(4)
-                boundsBehavior: Flickable.StopAtBounds
-
-                delegate: EntryRow { base: pinnedModel.count }
-              }
-
-              // No edge fades: content clips cleanly at the card. The fade
-              // gradients read as a smudge across the first and last visible
-              // row, and the scroll indicator already says there is more.
-
-              // slim scroll indicator for the recency list
-              Item {
-                id: scrollIndicator
-                visible: resultList.contentHeight > resultList.height + 1
-                anchors.top: resultList.top
-                anchors.bottom: resultList.bottom
-                anchors.right: resultList.right
-                anchors.rightMargin: Style.space(2)
-                width: Style.space(3)
-
-                Rectangle {
-                  width: parent.width
-                  radius: width / 2
-                  color: Util.alpha(root.foreground, 0.22)
-                  height: Math.max(Style.space(20),
-                                   parent.height * (resultList.height / Math.max(1, resultList.contentHeight)))
-                  y: {
-                    var maxScroll = Math.max(1, resultList.contentHeight - resultList.height)
-                    var travel = Math.max(0, parent.height - height)
-                    return Math.max(0, Math.min(travel, (resultList.contentY / maxScroll) * travel))
-                  }
-                  Behavior on y { NumberAnimation { duration: 80 } }
-                }
-              }
+              anchors.leftMargin: Style.space(3)
+              anchors.verticalCenter: parent.verticalCenter
             }
 
-            }
-
-            // ---- preview pane ----
-            Item {
-              id: previewPane
-              anchors.right: parent.right
-              width: parent.width * 0.62
-              height: parent.height
+            // leading tile: thumbnail, colour swatch, or kind glyph
+            Rectangle {
+              id: tile
+              anchors.left: parent.left
+              anchors.leftMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              width: root.rowHeight - Style.space(14)
+              height: width
+              radius: Style.space(6)
               clip: true
-              visible: width > 0 && root.previewOpen && root.canPreview(previewPane.activeRow)
-
-              property var activeRow: root.cursorActive ? root.rowAt(root.selectedIndex) : null
-
-              Rectangle {
-                anchors.fill: parent
-                color: Util.alpha(root.border, 0.04)
-              }
-
-              Rectangle {
-                anchors.left: parent.left
-                anchors.top: parent.top
-                anchors.bottom: parent.bottom
-                width: Style.normalBorderWidth
-                color: Util.alpha(root.border, 0.3)
-              }
-
-              Text {
-                id: previewHeader
-                textFormat: Text.PlainText
-                text: "PREVIEW"
-                color: root.foreground
-                opacity: 0.45
-                font.family: root.fontFamily
-                font.pixelSize: root.metaFont
-                font.letterSpacing: 1.5
-                anchors.left: parent.left
-                anchors.leftMargin: root.previewPadding
-                anchors.top: parent.top
-                anchors.topMargin: Style.space(6)
-              }
-
-              Flickable {
-                visible: previewPane.activeRow && !previewPane.activeRow.previewImage
-                anchors.fill: parent
-                anchors.leftMargin: root.previewPadding
-                anchors.rightMargin: root.previewPadding
-                anchors.topMargin: previewHeader.height + Style.space(16)
-                anchors.bottomMargin: root.previewPadding
-                contentWidth: width
-                contentHeight: previewText.implicitHeight
-                clip: true
-                interactive: true
-                boundsBehavior: Flickable.StopAtBounds
-
-                Text {
-                  id: previewText
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: visible && previewPane.activeRow ? root.fullTextOf(previewPane.activeRow) : ""
-                  color: root.foreground
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.body
-                  wrapMode: Text.WrapAnywhere
-                }
-              }
+              color: entryRow.isColor ? entryRow.fullText.trim()
+                     : Util.alpha(entryRow.isLink || entryRow.pinned ? Color.accent : root.foreground,
+                                  entryRow.hasCursor ? 0.14 : 0.07)
+              border.width: 1
+              border.color: Util.alpha(root.foreground, entryRow.entryType === "image" || entryRow.isColor ? 0.16 : 0)
 
               Image {
-                visible: parent.activeRow && parent.activeRow.previewImage
+                visible: entryRow.entryType === "image"
                 anchors.fill: parent
-                anchors.leftMargin: root.previewPadding
-                anchors.rightMargin: root.previewPadding
-                anchors.topMargin: previewHeader.height + Style.space(16)
-                anchors.bottomMargin: root.previewPadding
-                source: parent.activeRow ? parent.activeRow.previewImage : ""
-                fillMode: Image.PreserveAspectFit
-                verticalAlignment: Image.AlignTop
+                source: entryRow.previewImage
+                sourceSize.width: 96
+                sourceSize.height: 96
+                fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 smooth: true
               }
+
+              Text {
+                visible: entryRow.entryType !== "image" && !entryRow.isColor
+                anchors.centerIn: parent
+                text: {
+                  switch (entryRow.kind) {
+                    case "Link": return "󰌹"
+                    case "Email": return "󰇮"
+                    case "Path": return "󰉋"
+                    case "Code": return "󰘦"
+                    default: return "󰦨"
+                  }
+                }
+                color: entryRow.isLink || entryRow.pinned ? Color.accent : root.foreground
+                opacity: entryRow.isLink || entryRow.pinned ? 1 : 0.6
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+              }
             }
+
+            Column {
+              anchors.left: tile.right
+              anchors.leftMargin: Style.space(11)
+              anchors.right: trailing.left
+              anchors.rightMargin: Style.space(8)
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(2)
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: entryRow.entryType === "image" ? "Image" : entryRow.previewText
+                color: entryRow.isLink ? Color.accent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                elide: Text.ElideRight
+              }
+
+              Text {
+                width: parent.width
+                textFormat: Text.PlainText
+                text: {
+                  var parts = [entryRow.entryType === "image" ? YankHistory.imageFormat(entryRow.mime) : entryRow.kind]
+                  var size = YankHistory.formatBytes(entryRow.bytes)
+                  if (size) parts.push(size)
+                  var ago = YankHistory.relativeTime(entryRow.createdAt, root.now)
+                  if (ago) parts.push(ago)
+                  return parts.join("  ·  ")
+                }
+                color: root.foreground
+                opacity: 0.45
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+              }
+            }
+
+            Text {
+              id: trailing
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(12)
+              anchors.verticalCenter: parent.verticalCenter
+              width: entryRow.pinned ? implicitWidth : 0
+              text: entryRow.pinned ? "󰐃" : ""
+              color: Color.accent
+              opacity: 0.7
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+            }
+
+            // Selection follows the pointer only after a short dwell, so sweeping
+            // across the list does not make the detail pane flicker.
+            Timer {
+              id: hoverDwell
+              interval: 220
+              repeat: false
+              onTriggered: {
+                if (!root.hoverAllowed) return
+                root.cursorActive = true
+                root.selectedIndex = entryRow.base + entryRow.index
+              }
+            }
+
+            MouseArea {
+              id: rowHoverArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onEntered: {
+                if (!root.hoverAllowed) return
+                hoverDwell.restart()
+              }
+              onExited: hoverDwell.stop()
+              onClicked: {
+                hoverDwell.stop()
+                root.cursorActive = true
+                root.selectedIndex = entryRow.base + entryRow.index
+                root.activateSelected(false)
+              }
+            }
+          }
+
+          component SectionLabel: Text {
+            textFormat: Text.PlainText
+            color: root.foreground
+            opacity: 0.4
+            font.family: root.fontFamily
+            font.pixelSize: root.metaFont
+            font.letterSpacing: 1.4
+            leftPadding: Style.space(12)
+            topPadding: Style.space(8)
+            bottomPadding: Style.space(4)
+          }
+
+          // ---- list column: takes the full width when the detail pane is hidden ----
+          Item {
+            id: listColumn
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: root.previewOpen ? Math.round(parent.width * 0.44) : parent.width
+            Behavior on width { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+            // ---- sticky pinned block ----
+            Column {
+              id: pinnedArea
+              anchors.top: parent.top
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(6)
+              visible: pinnedModel.count > 0
+
+              SectionLabel { text: "PINNED" }
+
+              ListView {
+                id: pinnedList
+                width: parent.width
+                height: contentHeight
+                interactive: false
+                model: pinnedModel
+                spacing: Style.space(2)
+
+                delegate: EntryRow { base: 0 }
+              }
+            }
+
+            SectionLabel {
+              id: recentHeader
+              anchors.top: pinnedArea.visible ? pinnedArea.bottom : parent.top
+              visible: displayModel.count > 0 && pinnedModel.count > 0
+              text: "RECENT"
+            }
+
+            ListView {
+              id: resultList
+              anchors.top: recentHeader.visible ? recentHeader.bottom : parent.top
+              anchors.topMargin: pinnedModel.count > 0 ? 0 : Style.space(6)
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.rightMargin: Style.space(6)
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: Style.space(4)
+              model: displayModel
+              clip: true
+              spacing: Style.space(2)
+              boundsBehavior: Flickable.StopAtBounds
+
+              delegate: EntryRow { base: pinnedModel.count }
+            }
+
+            // slim scroll indicator for the recency list
+            Item {
+              visible: resultList.contentHeight > resultList.height + 1
+              anchors.top: resultList.top
+              anchors.bottom: resultList.bottom
+              anchors.right: parent.right
+              width: Style.space(3)
+
+              Rectangle {
+                width: parent.width
+                radius: width / 2
+                color: Util.alpha(root.foreground, 0.2)
+                height: Math.max(Style.space(20),
+                                 parent.height * (resultList.height / Math.max(1, resultList.contentHeight)))
+                y: {
+                  var maxScroll = Math.max(1, resultList.contentHeight - resultList.height)
+                  var travel = Math.max(0, parent.height - height)
+                  return Math.max(0, Math.min(travel, (resultList.contentY / maxScroll) * travel))
+                }
+              }
+            }
+          }
+
+          Rectangle {
+            visible: root.previewOpen
+            anchors.left: listColumn.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: 1
+            color: Util.alpha(root.foreground, 0.08)
+          }
+
+          // ---- detail pane: always shows the focused entry ----
+          Item {
+            id: previewPane
+            anchors.left: listColumn.right
+            anchors.leftMargin: 1
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            visible: root.previewOpen && width > Style.space(40)
+            clip: true
+
+            property var activeRow: root.cursorActive ? root.rowAt(root.selectedIndex) : null
+            readonly property bool isImage: !!activeRow && activeRow.entryType === "image"
+            readonly property bool isColor: !!activeRow && activeRow.isColor === true
+            readonly property string fullText: activeRow && !isImage ? root.fullTextOf(activeRow) : ""
+
+            // header: kind + when
+            Item {
+              id: detailHeader
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.margins: root.previewPadding
+              height: Style.space(22)
+              visible: !!previewPane.activeRow
+
+              Rectangle {
+                id: kindBadge
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                height: Style.space(20)
+                width: kindBadgeText.implicitWidth + Style.space(16)
+                radius: height / 2
+                color: Util.alpha(Color.accent, 0.14)
+
+                Text {
+                  id: kindBadgeText
+                  anchors.centerIn: parent
+                  textFormat: Text.PlainText
+                  text: {
+                    var r = previewPane.activeRow
+                    if (!r) return ""
+                    var label = r.entryType === "image" ? "Image" : r.kind
+                    return (r.pinned ? "󰐃  " : "") + label
+                  }
+                  color: Color.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.DemiBold
+                }
+              }
+
+              Text {
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.PlainText
+                text: {
+                  var r = previewPane.activeRow
+                  var ago = r ? YankHistory.relativeTime(r.createdAt, root.now) : ""
+                  return ago ? "Copied " + ago : ""
+                }
+                color: root.foreground
+                opacity: 0.45
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            // body
+            Item {
+              id: detailBody
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: detailHeader.bottom
+              anchors.bottom: detailMeta.top
+              anchors.leftMargin: root.previewPadding
+              anchors.rightMargin: root.previewPadding
+              anchors.topMargin: Style.space(10)
+              anchors.bottomMargin: Style.space(10)
+
+              // image, on a soft plate so transparent pixels stay visible
+              Rectangle {
+                visible: previewPane.isImage
+                anchors.fill: parent
+                radius: Style.space(8)
+                color: Util.alpha(root.foreground, 0.04)
+                border.width: 1
+                border.color: Util.alpha(root.foreground, 0.08)
+
+                Image {
+                  id: detailImage
+                  anchors.fill: parent
+                  anchors.margins: Style.space(10)
+                  source: previewPane.isImage ? previewPane.activeRow.previewImage : ""
+                  fillMode: Image.PreserveAspectFit
+                  asynchronous: true
+                  smooth: true
+                  mipmap: true
+                }
+              }
+
+              // colour: a large swatch
+              Column {
+                visible: previewPane.isColor
+                anchors.centerIn: parent
+                spacing: Style.space(12)
+
+                Rectangle {
+                  width: Math.min(detailBody.width, detailBody.height - Style.space(40))
+                  height: width * 0.62
+                  radius: Style.space(10)
+                  color: previewPane.isColor ? previewPane.fullText.trim() : "transparent"
+                  border.width: 1
+                  border.color: Util.alpha(root.foreground, 0.16)
+                }
+
+                Text {
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  textFormat: Text.PlainText
+                  text: previewPane.isColor ? previewPane.fullText.trim() : ""
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.heading
+                  font.weight: Font.DemiBold
+                }
+              }
+
+              // text
+              Flickable {
+                id: detailFlick
+                visible: !!previewPane.activeRow && !previewPane.isImage && !previewPane.isColor
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: detailText.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Text {
+                  id: detailText
+                  width: parent.width
+                  textFormat: Text.PlainText
+                  text: detailFlick.visible ? previewPane.fullText : ""
+                  color: previewPane.activeRow && previewPane.activeRow.isLink ? Color.accent : root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  lineHeight: 1.25
+                  wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                }
+              }
+            }
+
+            // meta line
+            Text {
+              id: detailMeta
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              anchors.margins: root.previewPadding
+              visible: !!previewPane.activeRow
+              textFormat: Text.PlainText
+              text: {
+                var r = previewPane.activeRow
+                if (!r) return ""
+                if (r.entryType === "image") {
+                  var parts = [YankHistory.imageFormat(r.mime)]
+                  if (detailImage.status === Image.Ready)
+                    parts.push(detailImage.sourceSize.width + " × " + detailImage.sourceSize.height)
+                  var size = YankHistory.formatBytes(r.bytes)
+                  if (size) parts.push(size)
+                  return parts.join("  ·  ")
+                }
+                return YankHistory.textStats(previewPane.fullText)
+              }
+              color: root.foreground
+              opacity: 0.45
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+          }
         }
 
+        Rectangle { width: parent.width; height: 1; color: Util.alpha(root.foreground, 0.08) }
+
+        // ---- footer: count + key hints ----
+        Item {
+          id: footer
+          width: parent.width
+          height: Style.space(34)
+
+          Text {
+            anchors.left: parent.left
+            anchors.leftMargin: Style.space(4)
+            anchors.verticalCenter: parent.verticalCenter
+            textFormat: Text.PlainText
+            text: {
+              var total = root.history.length
+              var shown = root.combinedCount
+              var base = shown === total ? total + (total === 1 ? " item" : " items") : shown + " of " + total
+              return root.cursorActive && shown > 0 ? (root.selectedIndex + 1) + " / " + base : base
+            }
+            color: root.foreground
+            opacity: 0.45
+            font.family: root.fontFamily
+            font.pixelSize: root.metaFont
+          }
+
+          Row {
+            anchors.right: headerSettings.left
+            anchors.rightMargin: Style.space(10)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(14)
+
+            Repeater {
+              model: [
+                { keys: "Enter", label: "Paste", primary: true },
+                { keys: "Shift+Enter", label: "Copy" },
+                { keys: "Ctrl+P", label: "Pin" },
+                { keys: "Ctrl+.", label: "Actions" },
+                { keys: "?", label: "Keys" }
+              ]
+
+              delegate: Row {
+                required property var modelData
+                spacing: Style.space(6)
+                KeyCap { label: modelData.keys; primary: !!modelData.primary; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                  textFormat: Text.PlainText
+                  text: modelData.label
+                  color: root.hintLabel
+                  font.family: root.fontFamily
+                  font.pixelSize: root.metaFont
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+            }
+          }
+
+          // Settings affordance: a gear that opens the settings panel.
+          Item {
+            id: headerSettings
+            width: Style.space(22)
+            height: width
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+
+            Rectangle {
+              anchors.fill: parent
+              radius: width / 2
+              color: settingsArea.containsMouse || root.helpOpen
+                     ? Util.alpha(root.foreground, 0.08) : "transparent"
+              Behavior on color { ColorAnimation { duration: 110 } }
+            }
+
+            Text {
+              anchors.centerIn: parent
+              text: "\u{F0493}"   // nf-md-cog
+              color: root.helpOpen ? root.selectedText : root.chevron
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+
+            MouseArea {
+              id: settingsArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.openHelp("settings")
+            }
+          }
+        }
       }
 
         // ---- help popup ----
@@ -1863,7 +1892,7 @@ Item {
                 rows: [
                   { keys: ["Enter"], label: "paste" },
                   { keys: ["Shift+Enter"], label: "copy only" },
-                  { keys: ["Ctrl+O"], label: "preview" },
+                  { keys: ["Ctrl+O"], label: "detail pane" },
                   { keys: ["Esc"], label: "close" }
                 ]
               }
@@ -1873,7 +1902,7 @@ Item {
                 rows: [
                   { keys: ["?"], label: "this reference" },
                   { keys: ["Ctrl+,"], label: "settings" },
-                  { keys: ["Ctrl+O"], label: "preview" },
+                  { keys: ["Ctrl+O"], label: "detail pane" },
                   { keys: ["Ctrl+."], label: "actions menu" }
                 ]
               }

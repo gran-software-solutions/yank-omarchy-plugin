@@ -337,6 +337,48 @@ function metadata(entry) {
          " · " + lines + (lines === 1 ? " line" : " lines")
 }
 
+// "just now", "5m ago", "3h ago", "yesterday", "4d ago", then a date.
+function relativeTime(createdAt, now) {
+  var ts = Date.parse(String(createdAt || ""))
+  if (isNaN(ts)) return ""
+  var secs = Math.max(0, Math.floor(((now || Date.now()) - ts) / 1000))
+  if (secs < 45) return "just now"
+  var mins = Math.floor(secs / 60)
+  if (mins < 60) return Math.max(1, mins) + "m ago"
+  var hours = Math.floor(mins / 60)
+  if (hours < 24) return hours + "h ago"
+  var days = Math.floor(hours / 24)
+  if (days === 1) return "yesterday"
+  if (days < 7) return days + "d ago"
+  var d = new Date(ts)
+  var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  return d.getDate() + " " + months[d.getMonth()]
+}
+
+function formatBytes(n) {
+  var b = Number(n) || 0
+  if (b <= 0) return ""
+  if (b < 1024) return b + " B"
+  if (b < 1024 * 1024) return Math.round(b / 1024) + " KB"
+  return (b / (1024 * 1024)).toFixed(1) + " MB"
+}
+
+// Short format name for an image mime: "image/png" -> "PNG".
+function imageFormat(mime) {
+  var m = String(mime || "image/png").replace(/^image\//, "")
+  return (m === "jpeg" ? "jpg" : m).toUpperCase()
+}
+
+// Stats line for the detail pane, e.g. "42 words · 3 lines · 256 chars".
+function textStats(text) {
+  var t = String(text || "")
+  var words = t.split(/\s+/).filter(function(w) { return w.length > 0 }).length
+  var lines = t.replace(/\n$/, "").split(/\r?\n/).length
+  return words + (words === 1 ? " word" : " words") + " · " +
+         lines + (lines === 1 ? " line" : " lines") + " · " +
+         t.length + (t.length === 1 ? " char" : " chars")
+}
+
 function searchableText(entry) {
   if (!entry) return ""
   if (entry.type === "image") return "image " + String(entry.mime || "") + " " + String(entry.path || "")
@@ -369,7 +411,10 @@ var displayTextLimit = 8192
 
 function cappedEntry(entry) {
   if (!entry || entry.type !== "text" || entry.text.length <= displayTextLimit) return entry
-  return { type: "text", text: entry.text.slice(0, displayTextLimit) }
+  var capped = { type: "text", text: entry.text.slice(0, displayTextLimit) }
+  if (entry.pinned) capped.pinned = true
+  if (entry.createdAt) capped.createdAt = entry.createdAt
+  return capped
 }
 
 function displayRows(history, query, kind, limit) {
@@ -409,6 +454,9 @@ function displayRows(history, query, kind, limit) {
       previewImage: entry.type === "image" ? String(entry.path || "") : "",
       path: entry.type === "image" ? String(entry.path || "") : "",
       mime: entry.type === "image" ? String(entry.mime || "image/png") : "text/plain",
+      kind: kindLabel(entry),
+      createdAt: String(entry.createdAt || ""),
+      bytes: entry.type === "image" ? (entry.bytes || 0) : 0,
       index: order[i],
       _score: score,
       _length: haystack.length,
