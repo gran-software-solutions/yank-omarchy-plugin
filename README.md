@@ -42,6 +42,10 @@ a terminal's tty instead of synthesising a keystroke.
 - **Pastes into terminals properly**, not with a fake `Ctrl+V`.
 - **Actions menu**: open a link, edit a copy, save an image, remove.
 - **Keeps 200 unpinned entries**, or fewer days if you set a limit.
+- **Bounded size**: a copy over 1 MB of text or 20 MB of image is not recorded
+  (checked while reading, so it is never buffered whole). Unpinned history is
+  also capped at 16 MB of text and 256 MB of images, oldest dropped first, and
+  image files no entry refers to any more are deleted.
 
 ## <img src="icons/keyboard.png" width="20" alt=""> Keys
 

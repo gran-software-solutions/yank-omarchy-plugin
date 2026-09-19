@@ -173,6 +173,7 @@ Item {
   function saveHistory() {
     root.history = YankHistory.pruneHistory(root.history, root.historyLimit, root.maxAgeDays)
     historyFile.setText(JSON.stringify(root.history, null, 2) + "\n")
+    imageGcTimer.restart()
   }
 
   function addClipboardEntry(entry) {
@@ -693,6 +694,32 @@ Item {
     onExited: watchRestartTimer.restart()
     stdout: SplitParser {
       onRead: function(data) { root.addClipboardJson(data) }
+    }
+  }
+
+  // Image files outlive their entries (removed, pruned, over budget) until
+  // capture.sh gc deletes whatever the saved history no longer references.
+  // Debounced, so a burst of copies costs one pass.
+  Timer {
+    id: imageGcTimer
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      if (imageGcProc.running) { restart(); return }
+      imageGcProc.payload = YankHistory.imagePaths(root.history) + "\n"
+      imageGcProc.stdinEnabled = true
+      imageGcProc.running = true
+    }
+  }
+
+  Process {
+    id: imageGcProc
+    property string payload: ""
+    command: ["bash", root.captureScript, "gc"]
+    onStarted: {
+      write(payload)
+      payload = ""
+      stdinEnabled = false
     }
   }
 

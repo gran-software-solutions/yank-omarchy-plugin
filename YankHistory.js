@@ -1,5 +1,16 @@
 // Yank history helpers: normalize, dedupe, pin, filter, and shape display rows.
 
+// Size limits. capture.sh already refuses anything over the per-entry limits
+// while reading (keep them in step); they are checked again here so a history
+// file written before they existed, or edited by hand, cannot bring an
+// oversized entry back into the shell.
+var maxTextLength = 1024 * 1024            // per text entry, in characters
+var maxImageBytes = 20 * 1024 * 1024       // per image file
+// Totals across unpinned entries, on top of the entry count and age limits.
+// The oldest are dropped first. Pinned entries are exempt, as everywhere.
+var unpinnedTextBudget = 16 * 1024 * 1024  // characters
+var unpinnedImageBudget = 256 * 1024 * 1024 // bytes
+
 function normalizeEntry(value) {
   if (typeof value === "string")
     return value.trim().length > 0 ? { type: "text", text: value } : null
@@ -11,6 +22,7 @@ function normalizeEntry(value) {
   var createdAt = String(value.createdAt || "")
   if (type === "text") {
     var text = String(value.text || "")
+    if (text.length > maxTextLength) return null
     if (text.trim().length === 0) return null
     var textEntry = { type: "text", text: text }
     if (pinned) textEntry.pinned = true
@@ -21,6 +33,13 @@ function normalizeEntry(value) {
     var path = String(value.path || "")
     if (!path) return null
     var imageEntry = { type: "image", path: path, mime: String(value.mime || "image/png") }
+    // Entries from before sizes were recorded have none; they count as 0 and
+    // age out through the count and age limits.
+    var bytes = Number(value.bytes)
+    if (isFinite(bytes) && bytes > 0) {
+      if (bytes > maxImageBytes) return null
+      imageEntry.bytes = Math.floor(bytes)
+    }
     if (pinned) imageEntry.pinned = true
     if (createdAt) imageEntry.createdAt = createdAt
     return imageEntry
@@ -72,14 +91,17 @@ function entriesOlderThan(history, days) {
 
 // Enforce limits on the unpinned entries: maxEntries caps how many are kept
 // (oldest dropped first); maxAgeDays drops those older than that (0 disables
-// the age limit). Pinned entries always survive and do not count toward the
-// cap, so pinning never eats into the history budget.
+// the age limit); the text and image budgets cap their total size. Pinned
+// entries always survive and do not count toward any of these, so pinning
+// never eats into the history budget.
 function pruneHistory(history, maxEntries, maxAgeDays) {
   var values = Array.isArray(history) ? history : []
   var max = Math.max(1, Number(maxEntries) || 200)
   var days = Number(maxAgeDays) || 0
   var next = []
   var unpinned = 0
+  var textUsed = 0
+  var imageUsed = 0
 
   var cutoff = days > 0 ? Date.now() - days * 86400000 : 0
   for (var i = 0; i < values.length; i++) {
@@ -91,10 +113,31 @@ function pruneHistory(history, maxEntries, maxAgeDays) {
       var ts = Date.parse(String(entry.createdAt || ""))
       if (!isNaN(ts) && ts < cutoff) continue
     }
+    // History is newest first, so once the budget is spent every older entry
+    // of that kind is dropped.
+    if (entry.type === "text") {
+      if (textUsed + entry.text.length > unpinnedTextBudget) { textUsed = unpinnedTextBudget; continue }
+      textUsed += entry.text.length
+    } else {
+      var size = entry.bytes || 0
+      if (imageUsed + size > unpinnedImageBudget) { imageUsed = unpinnedImageBudget; continue }
+      imageUsed += size
+    }
     next.push(entry)
     unpinned++
   }
   return next
+}
+
+// Image files the history still points at, one per line, for capture.sh gc.
+function imagePaths(history) {
+  var values = Array.isArray(history) ? history : []
+  var out = []
+  for (var i = 0; i < values.length; i++) {
+    var entry = normalizeEntry(values[i])
+    if (entry && entry.type === "image") out.push(entry.path)
+  }
+  return out.join("\n")
 }
 
 // Add (or bump) an entry. `limit` caps the unpinned entries only; pinned ones

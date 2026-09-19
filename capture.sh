@@ -10,6 +10,24 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/yank"
 IMAGE_DIR="$STATE_DIR/images"
 mkdir -p "$IMAGE_DIR"
 
+# Hard per-entry limits, enforced while reading so an oversized selection is
+# never fully written or buffered. Anything over the limit is dropped, not
+# truncated. Keep in step with maxImageBytes/maxTextLength in YankHistory.js.
+MAX_IMAGE_BYTES=$((20 * 1024 * 1024))
+MAX_TEXT_BYTES=$((1024 * 1024))
+
+# gc mode: read the image paths the history still references on stdin, one per
+# line, and delete every other file in images/. Files younger than a minute are
+# left alone: they may belong to a capture the shell has not recorded yet.
+if [[ ${1:-} == gc ]]; then
+  keep=$(cat)
+  find "$IMAGE_DIR" -maxdepth 1 -type f -mmin +1 -print0 |
+    while IFS= read -r -d '' f; do
+      grep -qxF -- "$f" <<<"$keep" || rm -f -- "$f"
+    done
+  exit 0
+fi
+
 types=$(wl-paste --list-types 2>/dev/null || true)
 
 # Never record password-manager or other marked-sensitive selections.
@@ -19,14 +37,16 @@ fi
 
 emit_image() {
   local mime="$1"
-  local ext tmp hash file
+  local ext tmp hash file bytes
 
   ext=${mime#image/}
   [[ $ext == jpeg ]] && ext=jpg
 
   tmp=$(mktemp --tmpdir="$IMAGE_DIR" yank.XXXXXX) || return 0
-  cat >"$tmp"
-  if [[ ! -s $tmp ]]; then
+  # Read at most one byte past the limit: that byte is what tells us it is over.
+  head -c $((MAX_IMAGE_BYTES + 1)) >"$tmp"
+  bytes=$(stat -c %s "$tmp" 2>/dev/null || echo 0)
+  if (( bytes == 0 || bytes > MAX_IMAGE_BYTES )); then
     rm -f "$tmp"
     return 0
   fi
@@ -35,17 +55,29 @@ emit_image() {
   file="$IMAGE_DIR/$hash.$ext"
   if [[ -e $file ]]; then
     rm -f "$tmp"
+    # Fresh mtime: gc must not reap it before the shell records the entry again.
+    touch "$file"
   else
     mv "$tmp" "$file"
   fi
 
-  jq -cn --arg mime "$mime" --arg path "$file" --arg at "$(date -Is)" \
-    '{type:"image", mime:$mime, path:$path, createdAt:$at}'
+  jq -cn --arg mime "$mime" --arg path "$file" --argjson bytes "$bytes" --arg at "$(date -Is)" \
+    '{type:"image", mime:$mime, path:$path, bytes:$bytes, createdAt:$at}'
 }
 
 emit_text() {
-  local raw
-  raw=$(cat) || return 0
+  local raw tmp bytes
+  # Bounded read into a scratch file first: the size is checked on the raw
+  # bytes, before bash strips NULs, and nothing over the limit is buffered.
+  tmp=$(mktemp) || return 0
+  head -c $((MAX_TEXT_BYTES + 1)) >"$tmp"
+  bytes=$(stat -c %s "$tmp" 2>/dev/null || echo 0)
+  if (( bytes > MAX_TEXT_BYTES )); then
+    rm -f "$tmp"
+    return 0
+  fi
+  raw=$(<"$tmp")
+  rm -f "$tmp"
 
   # Reject binary payloads offered as text (e.g. `cat file.png | wl-copy`):
   # bash already strips NULs while capturing; here we reject invalid UTF-8
