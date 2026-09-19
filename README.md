@@ -8,14 +8,18 @@ back into the window you were already in.
 
 `de.gransoftware.yank`&nbsp;&nbsp;·&nbsp;&nbsp;![version](https://img.shields.io/badge/version-1.0.0-2f6f4e?style=flat-square)&nbsp;![shell](https://img.shields.io/badge/Omarchy-shell%20plugin-3b4252?style=flat-square)&nbsp;![qml](https://img.shields.io/badge/built%20with-Quickshell%20%2F%20QML-41cd52?style=flat-square)&nbsp;![wayland](https://img.shields.io/badge/Wayland-wl--clipboard-005f87?style=flat-square)
 
+<img src="preview.png" alt="Yank in the Tokyo Night theme: the entry list on the left with thumbnails and timestamps, and the most recent copy, a chart image, shown at size in the detail pane on the right" width="100%">
+
+<sub>Opens on what you just copied — Tokyo Night</sub>
+
 <table>
   <tr>
-    <td width="50%"><img src="preview.png" alt="Yank overlay in a dark theme: search and filter bar above a list of clipboard entries" width="100%"></td>
-    <td width="50%"><img src="preview-light.png" alt="Yank overlay in a light theme, with the preview pane open next to the entry list" width="100%"></td>
+    <td width="50%"><img src="preview-light.png" alt="Yank in the Catppuccin Latte theme with a JavaScript snippet selected and shown in full in the detail pane" width="100%"></td>
+    <td width="50%"><img src="preview-colors.png" alt="Yank in the Gruvbox theme filtered to colours, with a large swatch and its RGB and HSL values in the detail pane" width="100%"></td>
   </tr>
   <tr>
-    <td align="center"><sub>Searching the history</sub></td>
-    <td align="center"><sub>Preview pane, light theme</sub></td>
+    <td align="center"><sub>Code in full — Catppuccin Latte</sub></td>
+    <td align="center"><sub>Colours as swatches — Gruvbox</sub></td>
   </tr>
 </table>
 
@@ -37,8 +41,9 @@ a terminal's tty instead of synthesising a keystroke.
   password managers.
 - **Search and filters**: all, text, links, images, colors.
 - **Detail pane** beside the list shows the focused entry in full: the image at
-  size with its dimensions, the whole text, or a large colour swatch. The panel
-  opens on your most recent copy, so what you just copied is already on screen.
+  size with its dimensions, the whole text, or a large colour swatch with its
+  RGB and HSL values. The panel opens on your most recent copy, so what you
+  just copied is already on screen.
 - **Pinned entries** stay on top, in your own order, and are never removed —
   not by Delete, not by clear, not by the size or age limits — until you unpin.
 - **Pastes into terminals properly**, not with a fake `Ctrl+V`. Images are

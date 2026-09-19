@@ -296,7 +296,7 @@ function isCode(text) {
   var t = String(text || "").trim()
   if (t.length < 8) return false
   if (/^[{\[<]/.test(t) && /[}\]>]/.test(t)) return true
-  return /(^|\n)\s*(function |def |class |import |from |#!\/|#! )/.test(t)
+  return /(^|\n)\s*(function |def |class |import |from |export |const |let |fn |async |#!\/|#! )/.test(t)
 }
 
 // Which filter kinds an entry belongs to. "all" and "text"/"images" are the
@@ -377,6 +377,31 @@ function textStats(text) {
   return words + (words === 1 ? " word" : " words") + " · " +
          lines + (lines === 1 ? " line" : " lines") + " · " +
          t.length + (t.length === 1 ? " char" : " chars")
+}
+
+// Channel values for a hex colour, e.g. "RGB 224 175 104  ·  HSL 36° 66% 64%".
+// Empty for anything that is not hex (rgb()/hsl() already spell theirs out).
+function colorStats(text) {
+  var m = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(String(text || "").trim())
+  if (!m) return ""
+  var hex = m[1]
+  if (hex.length <= 4) hex = hex.replace(/./g, function(c) { return c + c })
+  var r = parseInt(hex.slice(0, 2), 16), g = parseInt(hex.slice(2, 4), 16), b = parseInt(hex.slice(4, 6), 16)
+  var rf = r / 255, gf = g / 255, bf = b / 255
+  var max = Math.max(rf, gf, bf), min = Math.min(rf, gf, bf)
+  var l = (max + min) / 2, h = 0, sat = 0
+  if (max !== min) {
+    var d = max - min
+    sat = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    if (max === rf) h = (gf - bf) / d + (gf < bf ? 6 : 0)
+    else if (max === gf) h = (bf - rf) / d + 2
+    else h = (rf - gf) / d + 4
+    h *= 60
+  }
+  var out = "RGB " + r + " " + g + " " + b + "  ·  HSL " + Math.round(h) + "° " +
+            Math.round(sat * 100) + "% " + Math.round(l * 100) + "%"
+  if (hex.length === 8) out += "  ·  " + Math.round(parseInt(hex.slice(6, 8), 16) / 2.55) + "% alpha"
+  return out
 }
 
 function searchableText(entry) {

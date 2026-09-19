@@ -46,7 +46,10 @@ Item {
   // Keycaps are a soft white inset rather than a tinted fill: on a light card a
   // white chip reads as a physical key, while a grey chip reads as another
   // button competing with the row text.
-  readonly property color keycapFill: Util.alpha("#ffffff", 0.55)
+  // Dark themes get a faint foreground tint instead: a white chip there is a
+  // pale block whose label cannot be read.
+  readonly property bool lightTheme: background.hslLightness > 0.5
+  readonly property color keycapFill: lightTheme ? Util.alpha("#ffffff", 0.55) : Util.alpha(foreground, 0.07)
   readonly property color keycapBorder: Util.alpha(foreground, 0.20)
   readonly property color keycapText: Util.alpha(foreground, 0.9)
   // The single primary hint (Enter) takes the theme accent, so the most-used
@@ -1530,6 +1533,8 @@ Item {
                   if (size) parts.push(size)
                   return parts.join("  ·  ")
                 }
+                if (previewPane.isColor)
+                  return YankHistory.colorStats(previewPane.fullText) || YankHistory.textStats(previewPane.fullText)
                 return YankHistory.textStats(previewPane.fullText)
               }
               color: root.foreground
@@ -1799,7 +1804,7 @@ Item {
                   width: Style.space(64)
                   height: Style.space(26)
                   radius: Style.space(5)
-                  color: Util.alpha("#ffffff", 0.55)
+                  color: root.keycapFill
                   border.width: retentionInput.activeFocus ? 2 : 1
                   border.color: retentionInput.activeFocus
                                 ? Util.alpha(root.selectedText, 0.6)
